@@ -1,0 +1,6 @@
+mss>=9.0.1
+Pillow>=10.0.0
+pytesseract>=0.3.10
+rapidfuzz>=3.0.0
+pyautogui>=0.9.54
+keyboard>=0.13.5   # optional: enables the F12 global stop hotkey for auto-play
