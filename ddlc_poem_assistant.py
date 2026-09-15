@@ -813,7 +813,7 @@ class App(tk.Tk):
         if not ALLER_AVAILABLE:
             tk.Label(
                 content,
-                text=f"💡 This UI is designed for the 'Aller' font (DDLC's actual "
+                text=f"This UI is designed for the 'Aller' font (DDLC's actual "
                      f"font) - currently showing in {FONT} instead. Install the "
                      f"included Aller_Std_Rg.ttf for the authentic look.",
                 font=(FONT, 8), bg=PALETTE["accent_soft"], fg=PALETTE["text"],
@@ -899,7 +899,7 @@ class App(tk.Tk):
 
         self.scan_btn = RoundedButton(
             action_inner,
-            text="🔍  Scan Screen",
+            text="Scan Screen",
             command=self._scan_clicked,
             font=(FONT, 12, "bold"),
             bg=PALETTE["accent"],
@@ -912,7 +912,7 @@ class App(tk.Tk):
 
         region_btn = RoundedButton(
             action_inner,
-            text="⚙  Setup",
+            text="Setup",
             command=self._select_region,
             font=(FONT, 10, "bold"),
             bg=PALETTE["setup"],
@@ -924,7 +924,7 @@ class App(tk.Tk):
 
         self.autoplay_btn = RoundedButton(
             action_inner,
-            text="▶  Auto-play",
+            text="Auto-play",
             command=self._autoplay_clicked,
             font=(FONT, 10, "bold"),
             bg=PALETTE["autoplay"],
@@ -1194,7 +1194,7 @@ class App(tk.Tk):
             self.after(0, self._scan_done)
 
     def _scan_done(self):
-        self.scan_btn.config_style(state="normal", text="🔍  Scan Screen")
+        self.scan_btn.config_style(state="normal", text="Scan Screen")
         self._rerender_results()
 
     # -- auto-play -----------------------------------------------------------
@@ -1241,7 +1241,7 @@ class App(tk.Tk):
 
         self.autoplay_active = True
         self.autoplay_stop_requested = False
-        self.autoplay_btn.config_style(text="⏹  Stop Auto-play", bg=PALETTE["stop"], hover_bg=PALETTE["stop_hover"])
+        self.autoplay_btn.config_style(text="Stop Auto-play", bg=PALETTE["stop"], hover_bg=PALETTE["stop_hover"])
         self.scan_btn.config_style(state="disabled")
 
         if keyboard is not None:
@@ -1362,7 +1362,7 @@ class App(tk.Tk):
     def _autoplay_finished(self, reason):
         self.autoplay_active = False
         self.autoplay_stop_requested = False
-        self.autoplay_btn.config_style(text="▶  Auto-play", bg=PALETTE["autoplay"], hover_bg=PALETTE["autoplay_hover"])
+        self.autoplay_btn.config_style(text="Auto-play", bg=PALETTE["autoplay"], hover_bg=PALETTE["autoplay_hover"])
         self.scan_btn.config_style(state="normal")
         self.autoplay_status_var.set(reason)
 
@@ -1430,7 +1430,7 @@ class App(tk.Tk):
 
         if char == "monika":
             self.best_var.set(
-                "💚 Monika likes every word equally - pick any word!"
+                "Monika likes every word equally - pick any word!"
             )
         elif scored:
             best_words = []
