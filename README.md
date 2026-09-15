@@ -1,5 +1,5 @@
 # ddlc-poem-assistant
-A small desktop tool for the poem minigame in *Doki Doki Literature Club Plus!* (and normal ddlc, not limited to plus AND not even limited to pirated, on ALL versions..) . It reads the word tiles on your screen, looks them up against the game's actual word/point table, and tells you which visible word scores the most for whichever character you're trying to favor.
+A small desktop tool for the poem minigame in *Doki Doki Literature Club Plus!* (and normal ddlc, not limited to plus AND not even limited to pirated, on *ALL* versions..) . It reads the word tiles on your screen, looks them up against the game's actual word/point table, and tells you which visible word scores the most for whichever character you're trying to favor.
 Photo of how the scan screen feature works :
 
 <img width="1919" height="1079" alt="Screenshot 2026-09-15 195622" src="https://github.com/user-attachments/assets/53f4d246-d463-42e7-af11-74c7a1d3f065" />
