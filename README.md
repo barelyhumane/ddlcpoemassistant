@@ -1,13 +1,33 @@
 # ddlc-poem-assistant
 A small desktop tool for the poem minigame in *Doki Doki Literature Club Plus!* (and normal ddlc, not limited to plus, works even on pirated versions..) . It reads the word tiles on your screen, looks them up against the game's actual word/point table, and tells you which visible word scores the most for whichever character you're trying to favor.
 
-## Quick Windows setup
+## Standalone Windows build (recommended)
+
+Download `DDLC+ Poem Assistant.exe` from the latest GitHub release and run it directly. This is a self-contained Windows build that includes the Python dependencies, word data, and Tesseract OCR.
+
+You do not need to install Python or Tesseract separately. The first launch may take a few seconds while the bundled files are extracted.
+
+After opening the assistant:
+
+1. Click `Setup` and select the poem word-choice area.
+2. Keep the assistant window completely outside the selected capture region.
+3. Click `Scan Screen` or use `Auto-play`.
+
+If OCR does not work, use `Tesseract Path` to select `tesseract.exe` manually.
+
+## Quick Windows setup (from source)
 
 1. Download the ZIP with the green **Code** button and extract it.
 2. Double-click `install_windows.bat`. It installs the Python packages and Tesseract OCR for you. Tesseract may show a Windows UAC/admin prompt.
 3. When setup finishes, double-click `run_windows.bat` whenever you want to use the assistant.
 
 You still need Python 3.9 or newer installed. If it is missing, `install_windows.bat` tells you where to download it.
+
+## Building the standalone release
+
+To build a new standalone release from source, run `build_windows_exe.bat` after running `install_windows.bat`. The executable is written to the `release` folder. Building requires Tesseract to be installed on the build machine so its OCR files can be included.
+
+Photo of how the scan screen feature works :
 
 <img width="1919" height="1079" alt="Screenshot 2026-09-16 210429" src="https://github.com/user-attachments/assets/ac7b5138-a473-4282-b5ce-5d96a3cb01a5" />
 
@@ -17,6 +37,13 @@ https://github.com/user-attachments/assets/ff3cf96d-f8a8-48e8-94e8-32613c63ec71
 
 
 incase you don't understand what it means by "switching to ddlc window", it means to CLICK onto ddlc so the game is focused, if you don't do this, it'll stop on the final round (haven't tested, probably the case.)
+
+## Manual setup (only if the installer does not work)
+
+1. Install Python 3.9 or newer from https://www.python.org/downloads/windows/
+2. Install Tesseract OCR: https://github.com/tesseract-ocr/tesseract/releases/download/5.5.3/tesseract-ocr-w64-setup-5.5.3.20260724.exe
+3. Open Command Prompt in this folder and run `pip install -r requirements.txt`
+4. Run `python ddlc_poem_assistant.py`
 
 <img width="561" height="120" alt="Screenshot 2026-09-16 165556" src="https://github.com/user-attachments/assets/814a9665-39b6-4d17-af0c-07f59e532642" />
 <img width="370" height="139" alt="Screenshot 2026-09-16 165550" src="https://github.com/user-attachments/assets/13e9baa1-bf0f-46e9-bb77-9dc8a792ad68" />
