@@ -11,7 +11,7 @@ incase you don't understand what it means by "switching to ddlc window", it mean
 to start, click the green button named code, download zip, extract then do th instructions below (as you need ALL the files linked in the repo)
 
 
-Includes an auto-installer for required OCR reading methods, python, and requirements for python. Just run install-windows.bat, The user will also be prompted to use install-windows.bat if the required dependencies are not found.
+**Includes an auto-installer for required OCR reading methods, python, and requirements for python. Just run install-windows.bat, The user will also be prompted to use install-windows.bat if the required dependencies are not found.**
 
 Manual method:
 
