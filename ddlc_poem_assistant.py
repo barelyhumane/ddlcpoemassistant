@@ -1,28 +1,3 @@
-"""
-DDLC Plus - Poem Minigame Word Assistant
-==========================================
-Reads the word tiles on your screen during a DDLC Plus poem minigame,
-looks them up in a researched word/point database, and tells you which
-on-screen word scores the most points for whichever character you pick.
-
-No AI model / API calls are used at runtime - this is just:
-  screenshot -> OCR -> dictionary lookup -> sort by points
-which is both faster and more reliable than asking an LLM to "guess"
-DDLC's scoring, since the scoring is a fixed, known table.
-
---------------------------------------------------------------------
-SETUP (see README.md for full details)
---------------------------------------------------------------------
-1. Install Python 3.9+
-2. Install Tesseract OCR (separate program, not a pip package):
-     Windows: https://github.com/UB-Mannheim/tesseract/wiki
-     macOS:   brew install tesseract
-     Linux:   sudo apt install tesseract-ocr
-3. pip install -r requirements.txt
-4. python ddlc_poem_assistant.py
---------------------------------------------------------------------
-"""
-
 import ctypes
 import json
 import os
@@ -38,15 +13,13 @@ from tkinter import ttk, filedialog, messagebox
 
 
 def _set_windows_dpi_awareness():
-    """Tell Windows to render this Tk window at the display's native DPI."""
+    """make windows use the real screen dpi"""
     if sys.platform != "win32":
         return
     try:
         ctypes.OleDLL("shcore").SetProcessDpiAwareness(1)
     except (AttributeError, OSError):
-        # Older Windows versions may not expose shcore; this fallback is the
-        # older system-wide DPI-aware API and is still better than bitmap
-        # scaling the entire Tk window.
+        # fallback for older windows
         try:
             ctypes.windll.user32.SetProcessDPIAware()
         except (AttributeError, OSError):
@@ -55,7 +28,7 @@ def _set_windows_dpi_awareness():
 
 _set_windows_dpi_awareness()
 
-# ---- Optional/third-party deps -------------------------------------------
+# optional packages
 try:
     import mss
 except ImportError:
@@ -81,17 +54,16 @@ except ImportError:
 
 try:
     import pyautogui
-    pyautogui.FAILSAFE = True  # slam the mouse into a screen corner to abort instantly
-    pyautogui.PAUSE = 0        # we manage our own delays explicitly
+    pyautogui.FAILSAFE = True  # move the mouse to a corner to stop
+    pyautogui.PAUSE = 0
 except ImportError:
     pyautogui = None
 
 try:
-    import keyboard  # optional: lets the Stop hotkey work even if our window isn't focused
+    import keyboard  # optional f12 stop hotkey
 except ImportError:
     keyboard = None
 
-# ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RESOURCE_DIR = getattr(sys, "_MEIPASS", BASE_DIR)
 APP_DIR = (
@@ -107,15 +79,15 @@ APP_SETTINGS_PATH = os.path.join(APP_DIR, "app_settings.json")
 CHARACTERS = ["sayori", "natsuki", "yuri", "monika"]
 
 CHARACTER_COLORS = {
-    "sayori": "#ff9dc0",   # ribbon pink
-    "natsuki": "#ff6e78",  # cupcake coral-pink
-    "yuri": "#9b6fc9",     # purple
-    "monika": "#b8cf5a",   # yellow-green (chalkboard/"just Monika")
+    "sayori": "#ff9dc0",
+    "natsuki": "#ff6e78",
+    "yuri": "#9b6fc9",
+    "monika": "#b8cf5a",
 }
 
 
 def lighten_color(hex_color, factor=0.6):
-    """Blend a hex color toward white by `factor` (0=no change, 1=white)."""
+    """make a color lighter"""
     hex_color = hex_color.lstrip("#")
     r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
     r = int(r + (255 - r) * factor)
@@ -125,8 +97,7 @@ def lighten_color(hex_color, factor=0.6):
 
 
 def darken_color(hex_color, factor=0.15):
-    """Darken a hex color by `factor` (0=no change, 1=black) - used for
-    a subtle hover shade on already-solid-colored buttons."""
+    """make a color darker"""
     hex_color = hex_color.lstrip("#")
     r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
     r, g, b = int(r * (1 - factor)), int(g * (1 - factor)), int(b * (1 - factor))
@@ -142,42 +113,38 @@ CHARACTER_LABELS = {
     "monika": "Monika",
 }
 
-# ---- DDLC-inspired color palette (soft sakura pink/cream) ------------------
 PALETTE = {
-    "bg": "#fdf1f6",          # soft pink-cream page background
-    "card": "#fffbfd",        # near-white, pink-tinted card background
+    "bg": "#fdf1f6",
+    "card": "#fffbfd",
     "card_border": "#f6d9e6",
-    "header_from": "#ffb3d1", # header gradient, pink -> soft blush
+    "header_from": "#ffb3d1",
     "header_to": "#ffe3ee",
-    "text": "#4a2e3d",        # deep plum - readable on pink, not harsh black
+    "text": "#4a2e3d",
     "text_muted": "#a18290",
-    "accent": "#ff6f9c",      # sakura pink - primary action (Scan Screen)
+    "accent": "#ff6f9c",
     "accent_hover": "#ff4d84",
     "accent_soft": "#ffe1ec",
-    "setup": "#b48ad1",       # soft lavender - secondary action (Setup)
+    "setup": "#b48ad1",
     "setup_hover": "#9d6fbd",
-    "autoplay": "#7cc49a",    # soft mint green - auto-play idle ("go")
+    "autoplay": "#7cc49a",
     "autoplay_hover": "#5fae80",
-    "stop": "#e0607e",        # warm rose-red - auto-play active/stop
+    "stop": "#e0607e",
     "stop_hover": "#c94a68",
     "best_highlight": "#ffedb0",
     "row_alt": "#fff5f9",
     "unknown_text": "#b096a0",
 }
 
-FONT = "Aller"  # DDLC's actual UI font
+FONT = "Aller"
 
-# Fallback chain if Aller isn't installed on this machine - tried in order.
 FONT_FALLBACKS = ["Aller", "Segoe UI", "SF Pro Text", "Helvetica Neue",
                    "Ubuntu", "Noto Sans", "DejaVu Sans", "Arial"]
 
-ALLER_AVAILABLE = False  # set by resolve_font() once we have a Tk root to check against
+ALLER_AVAILABLE = False
 
 
 def resolve_font(root):
-    """Pick the best available font, preferring DDLC's real UI font (Aller)
-    and falling back through a few clean sans-serif options if it isn't
-    installed. Mutates the module-level FONT used everywhere in the UI."""
+    """use aller if it's installed, otherwise use a fallback font"""
     global FONT, ALLER_AVAILABLE
     try:
         available = set(tkfont.families(root))
@@ -190,21 +157,21 @@ def resolve_font(root):
             return
 
 
-FUZZY_MATCH_THRESHOLD = 78  # 0-100, lower = more forgiving of OCR typos
+FUZZY_MATCH_THRESHOLD = 78
 
-# ---- Auto-play settings ----------------------------------------------------
-OCR_SCALE_FACTOR = 2          # must match preprocess_image()'s resize multiplier
-AUTOPLAY_CLICK_DELAY = 1.3    # seconds to wait after each click before re-scanning
-AUTOPLAY_MAX_ROUNDS = 20      # hard safety cap - a full poem is ~20 word picks
-AUTOPLAY_END_STREAK = 2       # consecutive "looks ended" scans required before stopping
-AUTOPLAY_MIN_KNOWN_WORDS = 2  # fewer recognized words than this -> tiles look gone
-AUTOPLAY_STOP_HOTKEY = "f12"  # global stop hotkey (only active if 'keyboard' is installed)
+# auto-play settings
+OCR_SCALE_FACTOR = 2
+AUTOPLAY_CLICK_DELAY = 1.3
+AUTOPLAY_MAX_ROUNDS = 20
+AUTOPLAY_END_STREAK = 2
+AUTOPLAY_MIN_KNOWN_WORDS = 2
+AUTOPLAY_STOP_HOTKEY = "f12"
 
-UI_SUPERSAMPLE = 4  # render PIL shapes at 4x, then downsample for smooth edges
+UI_SUPERSAMPLE = 4
 
 
 def load_app_settings():
-    """Read optional UI preferences without ever blocking app startup."""
+    """load saved settings if there are any"""
     try:
         with open(APP_SETTINGS_PATH, "r", encoding="utf-8") as file:
             data = json.load(file)
@@ -214,23 +181,22 @@ def load_app_settings():
 
 
 def save_app_settings(settings):
-    """Persist small user preferences next to the app files."""
+    """save the settings next to the app"""
     try:
         with open(APP_SETTINGS_PATH, "w", encoding="utf-8") as file:
             json.dump(settings, file, indent=2)
     except OSError:
-        pass  # Preferences are optional; never make the main app fail over them.
+        pass
 
 
-# ---------------------------------------------------------------------------
 class WordDatabase:
-    """Loads the word -> points table and handles fuzzy lookups."""
+    """word data and lookups"""
 
     def __init__(self, path):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         self.meta = data.get("meta", {})
-        # normalized_key -> {"display": str, "points": {char: int}, "key": str}
+        # normalized word -> data
         self.entries = {}
         for word, points in data["words"].items():
             key = self._normalize(word)
@@ -240,14 +206,9 @@ class WordDatabase:
                 "key": key,
             }
         self._keys = list(self.entries.keys())
-        self._word_set = set(self._keys)  # For fast lookup in split detection
+        self._word_set = set(self._keys)
 
-        # Act 2: Sayori is gone, and her Act-1 words become available tile
-        # options for Natsuki and/or Yuri. Their POINT VALUES do not change
-        # (verified against the game's actual mechanic - it's simply that
-        # Sayori's column stops counting), but we track which words these
-        # are so the UI can label them and so Sayori can be disabled as an
-        # optimization target once Act 2 starts.
+        # these are the act 2 words that transfer from sayori
         raw_transfers = data.get("act2_sayori_transfers", {})
         self.act2_transfers = {
             char: {self._normalize(w) for w in words}
@@ -262,14 +223,14 @@ class WordDatabase:
         return text
 
     def lookup(self, raw_token):
-        """Return (entry_dict, match_score) for a raw OCR token, or (None, 0)."""
+        """look up one ocr token"""
         key = self._normalize(raw_token)
         if not key:
             return None, 0
         if key in self.entries:
             return self.entries[key], 100
         if process is None:
-            return None, 0  # rapidfuzz not installed - exact match only
+            return None, 0
         match = process.extractOne(key, self._keys, scorer=fuzz.ratio)
         if match and match[1] >= FUZZY_MATCH_THRESHOLD:
             matched_key = match[0]
@@ -278,19 +239,17 @@ class WordDatabase:
 
     def points_for(self, entry, character):
         if character == "monika":
-            return 3  # Monika likes everything equally
+            return 3
         return entry["points"].get(character, 0)
 
     def is_act2_inherited(self, entry, character):
-        """True if this word was originally Sayori's and only became a
-        valid Act 2 tile option for `character` after she was gone."""
+        """check if this is a transferred act 2 word"""
         return entry["key"] in self.act2_transfers.get(character, set())
 
 
-# ---------------------------------------------------------------------------
 def preprocess_image(pil_img):
-    """Light preprocessing to help OCR accuracy on game-UI text."""
-    img = pil_img.convert("L")  # grayscale
+    """prep the screenshot for ocr"""
+    img = pil_img.convert("L")
     w, h = img.size
     img = img.resize((w * 2, h * 2), Image.LANCZOS)
     img = ImageOps.autocontrast(img)
@@ -298,16 +257,11 @@ def preprocess_image(pil_img):
 
 
 def split_merged_tokens(token, word_set):
-    """
-    Attempt to split a merged token like 'unendingawesome' or 'sing fester' into known words.
-    Returns list of candidate words found, or [token] if no split is found.
-    """
-    # First, try splitting on spaces if present
+    """try to split one ocr token into known words"""
     if ' ' in token:
         space_split = token.lower().split()
         all_known = True
         for word in space_split:
-            # Normalize the word the same way the database does
             normalized = word.replace("-", "").replace("'", "")
             normalized = re.sub(r"[^a-z0-9]", "", normalized)
             if normalized not in word_set:
@@ -316,15 +270,13 @@ def split_merged_tokens(token, word_set):
         if all_known and len(space_split) > 1:
             return space_split
     
-    # If no spaces or space-split didn't work, try finding word boundaries
-    token_lower = token.lower().replace(" ", "")  # Remove spaces for boundary detection
+    token_lower = token.lower().replace(" ", "")
     results = []
     
     def find_words(s, current_split):
         if not s:
             results.append(current_split[:])
             return
-        # Try matching words of different lengths
         for i in range(min(len(s), 20), 0, -1):
             candidate = s[:i]
             if candidate in word_set:
@@ -334,17 +286,16 @@ def split_merged_tokens(token, word_set):
     
     find_words(token_lower, [])
     
-    # Return the split with most words (most likely correct)
     if results:
         best_split = max(results, key=len)
-        if len(best_split) > 1:  # Only return if we actually split something
+        if len(best_split) > 1:
             return best_split
     
     return [token]
 
 
 def extract_words_from_image(pil_img):
-    """Run OCR on an image and return a list of candidate word tokens."""
+    """run the simple ocr pass"""
     if pytesseract is None:
         raise RuntimeError(
             "pytesseract is not installed, or the Tesseract program isn't on "
@@ -352,7 +303,6 @@ def extract_words_from_image(pil_img):
         )
     processed = preprocess_image(pil_img)
     raw_text = pytesseract.image_to_string(processed, config="--psm 6")
-    # Split on whitespace/newlines; keep internal hyphens (e.g. "Doki-Doki")
     tokens = re.split(r"[\n\r]+|\s{2,}|\s(?=[A-Z])", raw_text)
     tokens = [t.strip(" .,:;!?\"'()[]") for t in tokens]
     tokens = [t for t in tokens if len(t) >= 2 and any(c.isalpha() for c in t)]
@@ -360,13 +310,7 @@ def extract_words_from_image(pil_img):
 
 
 def extract_words_with_boxes(pil_img):
-    """Run per-word OCR and return each token with its pixel bounding box.
-
-    The boxes are scaled back to the ORIGINAL, un-upscaled region-image
-    coordinates so auto-play knows where on screen to click. The same OCR
-    path is used by the preview and manual scan so they cannot disagree about
-    which poem words were recognized.
-    """
+    """run ocr and keep the word boxes for preview and auto-play"""
     if pytesseract is None:
         raise RuntimeError(
             "pytesseract is not installed, or the Tesseract program isn't on "
@@ -387,8 +331,6 @@ def extract_words_with_boxes(pil_img):
         if len(text) >= 2 and any(c.isalpha() for c in text) and conf >= 30:
             boxes.append({
                 "text": text,
-                # divide out the 2x upscale from preprocess_image() so these
-                # line up with the original captured-region image
                 "left": data["left"][i] / OCR_SCALE_FACTOR,
                 "top": data["top"][i] / OCR_SCALE_FACTOR,
                 "width": data["width"][i] / OCR_SCALE_FACTOR,
@@ -398,7 +340,7 @@ def extract_words_with_boxes(pil_img):
 
 
 def grab_region(region):
-    """region = (left, top, width, height) in absolute screen coords."""
+    """take a screenshot of the saved region"""
     if mss is None:
         raise RuntimeError("The 'mss' package is not installed. See README.md.")
     left, top, width, height = region
@@ -408,9 +350,8 @@ def grab_region(region):
         return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
 
-# ---------------------------------------------------------------------------
 def draw_gradient(canvas, width, height, color1, color2):
-    """Paint a left-to-right gradient onto a Canvas (used for the header)."""
+    """draw a gradient"""
     r1, g1, b1 = canvas.winfo_rgb(color1)
     r2, g2, b2 = canvas.winfo_rgb(color2)
     width = max(int(width), 1)
@@ -425,9 +366,7 @@ def draw_gradient(canvas, width, height, color1, color2):
 
 
 def draw_scalloped_edge(canvas, width, y, scallop_r, color):
-    """Draw a row of half-circle scallops along y (DDLC's title-screen
-    border look) by punching pale-background circles out of whatever's
-    drawn above them."""
+    """draw the little scalloped edge"""
     step = scallop_r * 2
     x = -scallop_r
     while x < width + scallop_r:
@@ -439,8 +378,7 @@ def draw_scalloped_edge(canvas, width, y, scallop_r, color):
 
 
 def draw_polka_dots(canvas, width, height, dot_color, radius=3, spacing=24, y_start=0):
-    """Scatter small polka dots across a canvas region - DDLC's title-screen
-    background pattern, drawn from scratch (not a copied asset)."""
+    """draw the background dots"""
     row = 0
     y = y_start + spacing / 2
     while y < height:
@@ -478,7 +416,7 @@ def _hex_to_rgb(hex_color):
 
 
 def _lanczos_filter():
-    """Return the Pillow resampling enum across supported Pillow versions."""
+    """get the pillow resize filter"""
     try:
         return Image.Resampling.LANCZOS
     except AttributeError:
@@ -486,7 +424,7 @@ def _lanczos_filter():
 
 
 def _make_rounded_image(width, height, fill, outline=None, radius=0, outline_width=1):
-    """Create an anti-aliased transparent rounded shape, or None without PIL."""
+    """make a smooth rounded shape"""
     if Image is None or ImageDraw is None or ImageTk is None:
         return None
     try:
@@ -516,7 +454,7 @@ def _make_rounded_image(width, height, fill, outline=None, radius=0, outline_wid
 def _make_decorative_strip(width, height, color1, color2, dot_color=None,
                            radius=0, spacing=24, scallop_color=None,
                            scallop_radius=0, y_start=0):
-    """Render header/footer decoration with supersampled PIL primitives."""
+    """make one of the pink decorative strips"""
     if Image is None or ImageDraw is None or ImageTk is None:
         return None
     try:
@@ -564,10 +502,7 @@ def _make_decorative_strip(width, height, color1, color2, dot_color=None,
 
 
 class RoundedButton(tk.Canvas):
-    """A pill/rounded-rectangle button (DDLC's actual button shape) built
-    on a Canvas, since plain tk.Button can't do rounded corners. Exposes a
-    tk.Button-ish surface (.config_style(), .state) so the rest of the app
-    can treat it like a normal button."""
+    """a rounded button made with a canvas"""
 
     def __init__(self, parent, text, command=None, bg=None, fg="white",
                  hover_bg=None, selected_bg=None, selected_fg=None, font=None,
@@ -606,10 +541,6 @@ class RoundedButton(tk.Canvas):
 
     def _redraw(self):
         self.delete("all")
-        # Use the ACTUAL current size (winfo_width/height), not the
-        # originally-requested -width/-height: pack(fill="x") stretches the
-        # canvas beyond what it was constructed with, and self["width"]
-        # only ever reflects the construction-time request, not that.
         w = self.winfo_width()
         h = self.winfo_height()
         if w <= 1:
@@ -637,13 +568,8 @@ class RoundedButton(tk.Canvas):
             self._shape_photo = ImageTk.PhotoImage(smooth_shape)
             self.create_image(0, 0, anchor="nw", image=self._shape_photo, tags="shape")
         else:
-            # Keep the original Canvas implementation as a dependency-safe
-            # fallback if Pillow/ImageTk cannot render the smooth shape.
             self.create_polygon(pts, smooth=True, fill=color, outline=color)
             if self.selected:
-                # A slightly darker ring around a selected button - a clear,
-                # persistent "this one is picked" indicator independent of
-                # mouse position (unlike hover, which comes and goes).
                 self.create_polygon(pts, smooth=True, fill="", outline=darken_color(color, 0.25), width=2)
         self.create_text(w // 2, h // 2, text=self.text, fill=textcolor, font=self.font_obj)
 
@@ -665,10 +591,7 @@ class RoundedButton(tk.Canvas):
 
     def config_style(self, bg=None, fg=None, text=None, state=None, hover_bg=None,
                       selected_bg=None, selected_fg=None, selected=None, font=None):
-        """tk.Button-ish .config() replacement - only touches what's passed.
-        NOTE: this widget is a Canvas, not a real Button - plain .config()
-        does NOT support bg/fg/text/state/relief the way a tk.Button does.
-        Always go through this method to change a RoundedButton's look."""
+        """change the button without rebuilding it"""
         if bg is not None:
             self.bg = bg
         if fg is not None:
@@ -697,12 +620,7 @@ class RoundedButton(tk.Canvas):
 
 
 class RoundedCard(tk.Frame):
-    """A container with a rounded-rectangle border (DDLC's soft dialogue-box
-    look), built the same way as RoundedButton: a background Canvas with the
-    real content Frame (`.body`) embedded via create_window. Pack/grid
-    children into `.body` exactly like you would into a plain tk.Frame - the
-    card grows to fit its content automatically, and also stretches to fill
-    extra space if the RoundedCard itself is packed with fill/expand."""
+    """a rounded frame for the different sections"""
 
     def __init__(self, parent, bg=None, border=None, radius=14, parent_bg=None):
         self.bg = bg or PALETTE["card"]
@@ -724,9 +642,6 @@ class RoundedCard(tk.Frame):
         self.canvas.bind("<Configure>", self._redraw)
 
     def _sync_min_size(self, event=None):
-        # The card's minimum size comes from its content's natural size -
-        # this is what makes fill="x"-only (non-expanding) cards hug their
-        # content instead of collapsing to 1x1.
         w = self.body.winfo_reqwidth() + 8
         h = self.body.winfo_reqheight() + 8
         self.canvas.configure(width=w, height=h)
@@ -754,16 +669,12 @@ class RoundedCard(tk.Frame):
                 self.canvas.create_polygon(pts, smooth=True, fill=self.bg,
                                             outline=self.border, width=1, tags="bgshape")
             self.canvas.tag_lower("bgshape")
-            # Let the body fill whatever space the canvas actually has (this
-            # is what lets a fill="both", expand=True card - like the results
-            # table - actually grow, instead of staying at its minimum size).
             self.canvas.coords(self._win, 4, 4)
             self.canvas.itemconfig(self._win, width=max(w - 8, 1), height=max(h - 8, 1))
 
 
-# ---------------------------------------------------------------------------
 class RegionSelector(tk.Toplevel):
-    """Full virtual-desktop transparent overlay for click-drag region selection."""
+    """the fullscreen box selector"""
 
     def __init__(self, master, on_selected):
         super().__init__(master)
@@ -771,7 +682,7 @@ class RegionSelector(tk.Toplevel):
 
         if mss is not None:
             with mss.mss() as sct:
-                mon = sct.monitors[0]  # combined virtual screen
+                mon = sct.monitors[0]
                 self.origin = (mon["left"], mon["top"])
                 geo = f"{mon['width']}x{mon['height']}+{mon['left']}+{mon['top']}"
         else:
@@ -828,7 +739,6 @@ class RegionSelector(tk.Toplevel):
             self.on_selected(region)
 
 
-# ---------------------------------------------------------------------------
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -854,31 +764,24 @@ class App(tk.Tk):
         self.region = self._load_region()
         saved_character = self.settings.get("selected_character", "sayori")
         saved_character = saved_character if saved_character in CHARACTERS else "sayori"
-        # Plain attribute rather than a Tk variable because the auto-play
-        # background thread also reads the active act.
         self.current_act = self.settings.get("current_act", "1")
         self.current_act = self.current_act if self.current_act in ("1", "2") else "1"
         if self.current_act == "2" and saved_character == "sayori":
             saved_character = "yuri"
         self.selected_character = tk.StringVar(value=saved_character)
-        self.last_results = []  # list of (entry, ocr_raw, match_score)
+        self.last_results = []
 
         self.autoplay_active = False
         self.autoplay_stop_requested = False
-        # Plain attribute (not a Tk variable) so the auto-play background
-        # thread can read it directly - matches how autoplay_stop_requested
-        # is already shared across threads elsewhere in this file.
         try:
             self.click_delay = float(self.settings.get("click_delay", AUTOPLAY_CLICK_DELAY))
         except (TypeError, ValueError):
             self.click_delay = AUTOPLAY_CLICK_DELAY
         self.click_delay = round(max(0.3, min(5.0, self.click_delay)), 1)
 
-        # Configure modern ttk style
         self.style = ttk.Style()
         self.style.theme_use("clam")
 
-        # Treeview styling
         self.style.configure("Treeview",
             background=PALETTE["card"],
             foreground=PALETTE["text"],
@@ -903,12 +806,11 @@ class App(tk.Tk):
             arrowsize=12
         )
 
-        resolve_font(self)  # prefer Aller (DDLC's real font) if installed
+        resolve_font(self)
         self._set_window_icon()
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    # -- persistence ---------------------------------------------------
     def _save_preferences(self):
         self.settings.update({
             "selected_character": self.selected_character.get(),
@@ -940,8 +842,7 @@ class App(tk.Tk):
             )
 
     def _set_window_icon(self):
-        """Draw a simple pink heart and use it as the window/taskbar icon -
-        no external asset files needed."""
+        """make the little heart icon"""
         if Image is None:
             return
         try:
@@ -955,12 +856,9 @@ class App(tk.Tk):
             self._icon_image = ImageTk.PhotoImage(img)
             self.iconphoto(True, self._icon_image)
         except Exception:
-            pass  # purely decorative - never worth failing startup over
+            pass
 
-    # -- UI --------------------------------------------------------------
     def _build_ui(self):
-        # Header - soft pink gradient banner with polka dots + a scalloped
-        # bottom edge (DDLC's actual title-screen look)
         header = tk.Canvas(self, height=64, highlightthickness=0, bd=0)
         header.pack(fill="x")
 
@@ -981,8 +879,6 @@ class App(tk.Tk):
                 scallop_radius=7,
             )
             if smooth_header is not None:
-                # Keep the PhotoImage alive; Tk otherwise garbage-collects it
-                # after this callback and the background can turn blank.
                 header._background_photo = ImageTk.PhotoImage(smooth_header)
                 header.create_image(0, 0, anchor="nw", image=header._background_photo)
             else:
@@ -1003,11 +899,6 @@ class App(tk.Tk):
         header.update_idletasks()
         _paint_header()
 
-        # Footer - a thin polka-dot strip, mirroring the header for symmetry.
-        # Packed BEFORE the expanding content frame below: pack() allocates
-        # space in call order, so a side="bottom" widget packed after an
-        # expand=True sibling gets squeezed to ~0px - it has to claim its
-        # slice first.
         footer = tk.Canvas(self, height=14, highlightthickness=0, bd=0, bg=PALETTE["accent_soft"])
         footer.pack(fill="x", side="bottom")
 
@@ -1035,7 +926,6 @@ class App(tk.Tk):
         footer.update_idletasks()
         _paint_footer()
 
-        # Main content area
         content = tk.Frame(self, bg=PALETTE["bg"])
         content.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -1049,8 +939,6 @@ class App(tk.Tk):
                 wraplength=480, justify="left", padx=10, pady=6,
             ).pack(fill="x", pady=(0, 10))
 
-        # Setup status - keeps dependencies visible without making users dig
-        # through a terminal if OCR or auto-play needs attention.
         setup_card = RoundedCard(content)
         setup_card.pack(fill="x", pady=(0, 12))
         setup_frame = setup_card.body
@@ -1080,7 +968,6 @@ class App(tk.Tk):
         repair_btn.pack(side="right", padx=(4, 0))
         self._update_setup_status()
 
-        # Act selector card
         act_card = RoundedCard(content)
         act_card.pack(fill="x", pady=(0, 12))
         act_frame = act_card.body
@@ -1117,7 +1004,6 @@ class App(tk.Tk):
 
         self._update_act_buttons()
 
-        # Character selection card
         char_card = RoundedCard(content)
         char_card.pack(fill="x", pady=(0, 12))
         char_frame = char_card.body
@@ -1149,7 +1035,6 @@ class App(tk.Tk):
         self._update_character_buttons()
         self._update_character_availability()
 
-        # Action buttons card
         action_card = RoundedCard(content)
         action_card.pack(fill="x", pady=(0, 12))
         action_frame = action_card.body
@@ -1210,7 +1095,6 @@ class App(tk.Tk):
             anchor="w",
         ).pack(side="left", fill="x", expand=True, padx=(8, 0))
 
-        # Auto-play delay control
         delay_row = tk.Frame(action_frame, bg=PALETTE["card"])
         delay_row.pack(fill="x", padx=12, pady=(0, 2))
 
@@ -1247,7 +1131,6 @@ class App(tk.Tk):
             anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 12))
 
-        # Status
         self.status_var = tk.StringVar(value=self._region_status_text())
         status_label = tk.Label(
             content, textvariable=self.status_var, fg=PALETTE["text_muted"],
@@ -1255,7 +1138,6 @@ class App(tk.Tk):
         )
         status_label.pack(fill="x", pady=(0, 2))
 
-        # Auto-play status (blank until auto-play is used)
         self.autoplay_status_var = tk.StringVar(value="")
         autoplay_status_label = tk.Label(
             content, textvariable=self.autoplay_status_var, fg=PALETTE["stop_hover"],
@@ -1263,8 +1145,6 @@ class App(tk.Tk):
         )
         autoplay_status_label.pack(fill="x", pady=(0, 8))
 
-        # Best recommendation card - styled like DDLC's dialogue box, with a
-        # small colored nameplate tag for whichever character is selected
         rec_card = RoundedCard(content, bg=PALETTE["best_highlight"], border=PALETTE["accent"])
         rec_card.pack(fill="x", pady=(0, 12))
         rec_frame = rec_card.body
@@ -1277,7 +1157,6 @@ class App(tk.Tk):
         )
         best_label.pack(fill="x")
 
-        # Results table card
         results_card = RoundedCard(content)
         results_card.pack(fill="both", expand=True, pady=(0, 12))
         results_frame = results_card.body
@@ -1307,7 +1186,6 @@ class App(tk.Tk):
             self.tree.column(col, width=width, anchor="center")
         self.tree.column("word", anchor="w")
 
-        # Row styling
         self.tree.tag_configure("best", background=PALETTE["best_highlight"], font=(FONT, 10, "bold"))
         self.tree.tag_configure("unknown", foreground=PALETTE["unknown_text"], font=(FONT, 10, "italic"))
         self.tree.tag_configure("even", background=PALETTE["row_alt"])
@@ -1319,7 +1197,6 @@ class App(tk.Tk):
         scroll.pack(side="right", fill="y")
         self.tree.configure(yscrollcommand=scroll.set)
 
-        # Manual entry card
         manual_card = RoundedCard(content)
         manual_card.pack(fill="x")
         manual_frame = manual_card.body
@@ -1396,7 +1273,7 @@ class App(tk.Tk):
             )
 
     def _capture_region_overlaps_assistant(self):
-        """Return True when the assistant window covers part of the OCR area."""
+        """check if the assistant covers part of the ocr area"""
         if not self.region or not self.winfo_viewable():
             return False
         try:
@@ -1584,7 +1461,6 @@ class App(tk.Tk):
         )
         close_btn.pack(pady=(0, 12))
 
-    # -- actions -----------------------------------------------------------
     def _select_region(self):
         self.withdraw()
         self.after(150, self._open_region_selector)
@@ -1599,7 +1475,6 @@ class App(tk.Tk):
 
         selector = RegionSelector(self, done)
         selector.grab_set()
-        # Ensure the main window comes back even if the user pressed Esc
         self.wait_window(selector)
         self.deiconify()
         self._update_setup_status()
@@ -1619,23 +1494,20 @@ class App(tk.Tk):
     def _do_scan(self):
         try:
             img = grab_region(self.region)
-            # Use the same per-word OCR path as the preview. The old line OCR
-            # mode could omit short tiles such as "play", "warm", "milk",
-            # and "pure" even when the preview recognized them correctly.
+            # same ocr as the preview
             boxes = extract_words_with_boxes(img)
             tokens = [box["text"] for box in boxes]
             results = []
             seen = set()
             
             for tok in tokens:
-                # First try exact/fuzzy lookup
+                # try exact/fuzzy lookup first
                 entry, score = self.db.lookup(tok)
                 
                 if entry is None:
-                    # Token not found - might be merged words
+                    # maybe tesseract merged a few words together
                     split_words = split_merged_tokens(tok, self.db._word_set)
                     if len(split_words) > 1:
-                        # Successfully split into multiple known words
                         for word in split_words:
                             entry, score = self.db.lookup(word)
                             if entry:
@@ -1644,14 +1516,9 @@ class App(tk.Tk):
                                     seen.add(key)
                                     results.append((entry, word, score))
                     else:
-                        # OCR can also pick up incidental text outside the
-                        # poem tiles (for example labels from another window).
-                        # Scan results should only contain recognized DDLC
-                        # words; unknown entries remain available for manual
-                        # typed-word analysis below.
+                        # ignore random text outside the poem tiles
                         continue
                 else:
-                    # Found it directly
                     key = entry["display"]
                     if key not in seen:
                         seen.add(key)
@@ -1668,7 +1535,6 @@ class App(tk.Tk):
         self.scan_btn.config_style(state="normal", text="Scan Screen")
         self._rerender_results()
 
-    # -- auto-play -----------------------------------------------------------
     def _autoplay_clicked(self):
         if self.autoplay_active:
             self._stop_autoplay()
@@ -1722,7 +1588,7 @@ class App(tk.Tk):
             try:
                 keyboard.add_hotkey(AUTOPLAY_STOP_HOTKEY, self._request_autoplay_stop)
             except Exception:
-                pass  # hotkey registration can fail on some setups; corner fail-safe still works
+                pass  # the mouse corner stop still works
 
         self._autoplay_countdown(3)
 
@@ -1732,9 +1598,7 @@ class App(tk.Tk):
             return
         if seconds_left <= 0:
             self.autoplay_status_var.set("Auto-play running...")
-            # Capture the target character on the main thread - the loop
-            # thread must not call self.selected_character.get() itself
-            # (Tk variables aren't safe to read from a background thread).
+            # get this on the main thread. tkinter vars aren't thread safe
             target_char = self.selected_character.get()
             threading.Thread(target=self._autoplay_loop, args=(target_char,), daemon=True).start()
             return
@@ -1748,7 +1612,6 @@ class App(tk.Tk):
 
     def _stop_autoplay(self):
         self._request_autoplay_stop()
-        # UI reset happens in _autoplay_loop's finally block via self.after(...)
 
     def _autoplay_loop(self, char):
         left, top, width, height = self.region
@@ -1885,7 +1748,6 @@ class App(tk.Tk):
                 self.db.points_for(entry, "yuri"),
                 self.db.points_for(entry, "monika"),
             )
-            # Combine tags: best + stripe
             tags = []
             if pts == best_score:
                 tags.append("best")
@@ -1929,9 +1791,8 @@ class App(tk.Tk):
             self.best_var.set("No recognized words yet - try scanning again.")
 
 
-# ---------------------------------------------------------------------------
 def find_tesseract_executable():
-    """Find Tesseract even when its installer did not update PATH yet."""
+    """find tesseract"""
     configured_path = load_app_settings().get("tesseract_path")
     candidates = [
         configured_path,
@@ -1955,7 +1816,7 @@ def find_tesseract_executable():
 
 
 def configure_tesseract():
-    """Point pytesseract at the discovered executable, if one is available."""
+    """tell pytesseract where tesseract is"""
     executable = find_tesseract_executable()
     if executable and pytesseract is not None:
         pytesseract.pytesseract.tesseract_cmd = executable
@@ -1963,7 +1824,7 @@ def configure_tesseract():
 
 
 def missing_dependencies():
-    """Return missing Python packages and external OCR software."""
+    """return anything that's missing"""
     missing = []
     if mss is None:
         missing.append("mss")
@@ -1996,7 +1857,7 @@ def check_dependencies():
 
 
 def run_windows_installer():
-    """Run setup, restart from the local virtual environment, and report success."""
+    """run the windows installer and restart"""
     if sys.platform != "win32":
         messagebox.showerror(
             "Windows setup only",
@@ -2060,7 +1921,7 @@ def run_windows_installer():
 
 
 def prompt_to_install_dependencies():
-    """Offer the bundled Windows installer when setup is incomplete."""
+    """offer the windows installer when setup is missing"""
     if sys.platform != "win32":
         return True
 
