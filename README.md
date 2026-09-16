@@ -9,8 +9,10 @@ https://github.com/user-attachments/assets/ff3cf96d-f8a8-48e8-94e8-32613c63ec71
 incase you don't understand what it means by "switching to ddlc window", it means to CLICK onto ddlc so the game is focused, if you don't do this, it'll stop on the final round (haven't tested, probably the case.)
 
 to start, click the green button named code, download zip, extract then do th instructions below (as you need ALL the files linked in the repo)
+Includes an auto-installer for required OCR reading methods, python, and requirements for python. Just run install-windows.bat, The user will also be prompted to use install-windows.bat if the required dependencies are not found.
 
-to make this work, download these things :
+Manual method:
+
 1. tesseract - https://github.com/tesseract-ocr/tesseract/releases/download/5.5.3/tesseract-ocr-w64-setup-5.5.3.20260724.exe (used for reading text)
 2. python - search up python download idk
 3. then open cmd prompt, and enter this to install the requirements. pip install -r requirements.txt
