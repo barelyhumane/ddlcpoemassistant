@@ -15,7 +15,6 @@ to make this work, download these things :
 2. python - search up python download idk
 3. then open cmd prompt, and enter this to install the requirements. pip install -r requirements.txt
 4. to run it, just open cmd prompt in the folder with the poem file and type in 'python ddlc_poem_assistant.py' (or just double click the py file, idk. both methods work))
-Vouches:
 
 <img width="561" height="120" alt="Screenshot 2026-09-16 165556" src="https://github.com/user-attachments/assets/814a9665-39b6-4d17-af0c-07f59e532642" />
 <img width="370" height="139" alt="Screenshot 2026-09-16 165550" src="https://github.com/user-attachments/assets/13e9baa1-bf0f-46e9-bb77-9dc8a792ad68" />
