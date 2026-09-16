@@ -27,12 +27,14 @@ import ctypes
 import json
 import os
 import re
+import shutil
 import sys
+import subprocess
 import threading
 import time
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import ttk, messagebox
+from tkinter import ttk, filedialog, messagebox
 
 
 def _set_windows_dpi_awareness():
@@ -93,6 +95,8 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORD_DATA_PATH = os.path.join(BASE_DIR, "word_data.json")
 REGION_CONFIG_PATH = os.path.join(BASE_DIR, "capture_region.json")
+WINDOWS_INSTALLER_PATH = os.path.join(BASE_DIR, "install_windows.bat")
+APP_SETTINGS_PATH = os.path.join(BASE_DIR, "app_settings.json")
 
 CHARACTERS = ["sayori", "natsuki", "yuri", "monika"]
 
@@ -191,6 +195,25 @@ AUTOPLAY_MIN_KNOWN_WORDS = 2  # fewer recognized words than this -> tiles look g
 AUTOPLAY_STOP_HOTKEY = "f12"  # global stop hotkey (only active if 'keyboard' is installed)
 
 UI_SUPERSAMPLE = 4  # render PIL shapes at 4x, then downsample for smooth edges
+
+
+def load_app_settings():
+    """Read optional UI preferences without ever blocking app startup."""
+    try:
+        with open(APP_SETTINGS_PATH, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_app_settings(settings):
+    """Persist small user preferences next to the app files."""
+    try:
+        with open(APP_SETTINGS_PATH, "w", encoding="utf-8") as file:
+            json.dump(settings, file, indent=2)
+    except OSError:
+        pass  # Preferences are optional; never make the main app fail over them.
 
 
 # ---------------------------------------------------------------------------
@@ -804,8 +827,14 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("DDLC+ Poem Word Assistant")
-        self.geometry("520x720")
-        self.minsize(480, 620)
+        self.settings = load_app_settings()
+        saved_geometry = self.settings.get("window_geometry")
+        if isinstance(saved_geometry, str) and re.fullmatch(
+                r"\d+x\d+(?:[+-]\d+){0,2}", saved_geometry):
+            self.geometry(saved_geometry)
+        else:
+            self.geometry("520x780")
+        self.minsize(480, 660)
         self.attributes("-topmost", True)
         self.configure(bg=PALETTE["bg"])
 
@@ -817,9 +846,15 @@ class App(tk.Tk):
             return
 
         self.region = self._load_region()
-        self.selected_character = tk.StringVar(value="sayori")
-        self.current_act = "1"  # "1" or "2" - plain attribute, read from the
-                                 # auto-play thread too, same pattern as click_delay
+        saved_character = self.settings.get("selected_character", "sayori")
+        saved_character = saved_character if saved_character in CHARACTERS else "sayori"
+        # Plain attribute rather than a Tk variable because the auto-play
+        # background thread also reads the active act.
+        self.current_act = self.settings.get("current_act", "1")
+        self.current_act = self.current_act if self.current_act in ("1", "2") else "1"
+        if self.current_act == "2" and saved_character == "sayori":
+            saved_character = "yuri"
+        self.selected_character = tk.StringVar(value=saved_character)
         self.last_results = []  # list of (entry, ocr_raw, match_score)
 
         self.autoplay_active = False
@@ -827,7 +862,11 @@ class App(tk.Tk):
         # Plain attribute (not a Tk variable) so the auto-play background
         # thread can read it directly - matches how autoplay_stop_requested
         # is already shared across threads elsewhere in this file.
-        self.click_delay = AUTOPLAY_CLICK_DELAY
+        try:
+            self.click_delay = float(self.settings.get("click_delay", AUTOPLAY_CLICK_DELAY))
+        except (TypeError, ValueError):
+            self.click_delay = AUTOPLAY_CLICK_DELAY
+        self.click_delay = round(max(0.3, min(5.0, self.click_delay)), 1)
 
         # Configure modern ttk style
         self.style = ttk.Style()
@@ -861,8 +900,22 @@ class App(tk.Tk):
         resolve_font(self)  # prefer Aller (DDLC's real font) if installed
         self._set_window_icon()
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # -- persistence ---------------------------------------------------
+    def _save_preferences(self):
+        self.settings.update({
+            "selected_character": self.selected_character.get(),
+            "current_act": self.current_act,
+            "click_delay": self.click_delay,
+            "window_geometry": self.geometry(),
+        })
+        save_app_settings(self.settings)
+
+    def _on_close(self):
+        self._save_preferences()
+        self.destroy()
+
     def _load_region(self):
         if os.path.exists(REGION_CONFIG_PATH):
             try:
@@ -990,6 +1043,37 @@ class App(tk.Tk):
                 wraplength=480, justify="left", padx=10, pady=6,
             ).pack(fill="x", pady=(0, 10))
 
+        # Setup status - keeps dependencies visible without making users dig
+        # through a terminal if OCR or auto-play needs attention.
+        setup_card = RoundedCard(content)
+        setup_card.pack(fill="x", pady=(0, 12))
+        setup_frame = setup_card.body
+        setup_row = tk.Frame(setup_frame, bg=PALETTE["card"])
+        setup_row.pack(fill="x", padx=12, pady=10)
+
+        self.setup_status_var = tk.StringVar()
+        tk.Label(
+            setup_row, textvariable=self.setup_status_var, font=(FONT, 8),
+            bg=PALETTE["card"], fg=PALETTE["text"], justify="left",
+            anchor="w", wraplength=235,
+        ).pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        tesseract_path_btn = RoundedButton(
+            setup_row, text="Tesseract Path", command=self._choose_tesseract_path,
+            font=(FONT, 8, "bold"), bg=PALETTE["accent_soft"],
+            fg=PALETTE["text"], hover_bg=PALETTE["card_border"],
+            radius=12, padx=9, pady=5,
+        )
+        tesseract_path_btn.pack(side="right", padx=(4, 0))
+
+        repair_btn = RoundedButton(
+            setup_row, text="Repair Setup", command=self._repair_setup,
+            font=(FONT, 8, "bold"), bg=PALETTE["setup"], fg="white",
+            hover_bg=PALETTE["setup_hover"], radius=12, padx=9, pady=5,
+        )
+        repair_btn.pack(side="right", padx=(4, 0))
+        self._update_setup_status()
+
         # Act selector card
         act_card = RoundedCard(content)
         act_card.pack(fill="x", pady=(0, 12))
@@ -1104,6 +1188,21 @@ class App(tk.Tk):
             min_width=140,
         )
         self.autoplay_btn.pack(side="left", padx=(6, 0))
+
+        preview_row = tk.Frame(action_frame, bg=PALETTE["card"])
+        preview_row.pack(fill="x", padx=12, pady=(0, 8))
+        self.preview_btn = RoundedButton(
+            preview_row, text="Preview OCR Capture", command=self._preview_ocr_clicked,
+            font=(FONT, 9, "bold"), bg=PALETTE["accent_soft"],
+            fg=PALETTE["text"], hover_bg=PALETTE["card_border"],
+            radius=14, padx=12, pady=6,
+        )
+        self.preview_btn.pack(side="left")
+        tk.Label(
+            preview_row, text="See the capture and detected words before scanning.",
+            font=(FONT, 8), bg=PALETTE["card"], fg=PALETTE["text_muted"],
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True, padx=(8, 0))
 
         # Auto-play delay control
         delay_row = tk.Frame(action_frame, bg=PALETTE["card"])
@@ -1247,11 +1346,13 @@ class App(tk.Tk):
         new_val = round(max(0.3, min(5.0, self.click_delay + step)), 1)
         self.click_delay = new_val
         self.delay_value_label.config(text=f"{new_val:.1f}s")
+        self._save_preferences()
 
     def _select_character(self, char):
         self.selected_character.set(char)
         self._update_character_buttons()
         self._rerender_results()
+        self._save_preferences()
 
     def _update_character_buttons(self):
         selected = self.selected_character.get()
@@ -1267,6 +1368,7 @@ class App(tk.Tk):
         if act_id == "2" and self.selected_character.get() == "sayori":
             self._select_character("yuri")  # Sayori isn't a valid target once Act 2 starts
         self._rerender_results()
+        self._save_preferences()
 
     def _update_act_buttons(self):
         for act_id, btn in self.act_buttons.items():
@@ -1292,6 +1394,150 @@ class App(tk.Tk):
             return f"Capture region set: {self.region}"
         return "No capture region set yet - click 'Setup' first."
 
+    def _update_setup_status(self):
+        missing = missing_dependencies()
+        region_state = "set" if self.region else "not set"
+        tesseract_path = find_tesseract_executable()
+        if missing:
+            self.setup_status_var.set(
+                "Setup needs attention: " + ", ".join(missing)
+                + f"\nOCR: {'found' if tesseract_path else 'not found'} • "
+                  f"Capture region: {region_state}"
+            )
+        else:
+            self.setup_status_var.set(
+                f"Setup ready • OCR: Tesseract found • Capture region: {region_state}"
+            )
+
+    def _choose_tesseract_path(self):
+        current_path = find_tesseract_executable()
+        initial_dir = os.path.dirname(current_path) if current_path else BASE_DIR
+        selected_path = filedialog.askopenfilename(
+            parent=self,
+            title="Select tesseract.exe",
+            initialdir=initial_dir,
+            filetypes=[("Tesseract executable", "tesseract.exe"), ("Executables", "*.exe")],
+        )
+        if not selected_path:
+            return
+
+        try:
+            check = subprocess.run(
+                [selected_path, "--version"], stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=5, check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            messagebox.showerror(
+                "Invalid Tesseract path",
+                f"That file could not be run as Tesseract:\n\n{exc}",
+            )
+            return
+        if check.returncode != 0:
+            messagebox.showerror(
+                "Invalid Tesseract path",
+                "That file did not respond to the Tesseract version check.",
+            )
+            return
+
+        self.settings["tesseract_path"] = os.path.abspath(selected_path)
+        self._save_preferences()
+        configure_tesseract()
+        self._update_setup_status()
+        messagebox.showinfo("Tesseract configured", "Tesseract is ready for OCR.")
+
+    def _repair_setup(self):
+        proceed = messagebox.askokcancel(
+            "Repair setup?",
+            "This reruns the Windows setup installer to repair missing Python "
+            "packages or Tesseract OCR.\n\n"
+            "Installing Tesseract may require a UAC/admin prompt and may add "
+            "Tesseract to your PATH for OCR to work.",
+        )
+        if proceed and run_windows_installer():
+            self.destroy()
+
+    def _preview_ocr_clicked(self):
+        if not self.region:
+            messagebox.showinfo(
+                "No region set",
+                "Click 'Setup' first and drag a box around the poem word area.",
+            )
+            return
+        if Image is None or ImageTk is None or pytesseract is None:
+            messagebox.showerror(
+                "OCR unavailable",
+                "Install the missing setup components before previewing OCR.",
+            )
+            return
+
+        self.preview_btn.config_style(state="disabled", text="Preparing Preview...")
+        threading.Thread(target=self._prepare_ocr_preview, daemon=True).start()
+
+    def _prepare_ocr_preview(self):
+        try:
+            screenshot = grab_region(self.region)
+            boxes = extract_words_with_boxes(screenshot)
+            preview = screenshot.copy()
+            if ImageDraw is not None:
+                draw = ImageDraw.Draw(preview)
+                for box in boxes:
+                    entry, _ = self.db.lookup(box["text"])
+                    color = "#7cc49a" if entry else "#e0607e"
+                    left, top = box["left"], box["top"]
+                    right = left + box["width"]
+                    bottom = top + box["height"]
+                    draw.rectangle((left, top, right, bottom), outline=color, width=3)
+            self.after(0, lambda: self._show_ocr_preview(preview, boxes))
+        except Exception as exc:
+            self.after(
+                0,
+                lambda: messagebox.showerror("OCR preview failed", str(exc)),
+            )
+        finally:
+            self.after(
+                0,
+                lambda: self.preview_btn.config_style(
+                    state="normal", text="Preview OCR Capture"
+                ),
+            )
+
+    def _show_ocr_preview(self, image, boxes):
+        preview_window = tk.Toplevel(self)
+        preview_window.title("OCR Preview")
+        preview_window.configure(bg=PALETTE["bg"])
+        preview_window.transient(self)
+
+        display_image = image.copy()
+        display_image.thumbnail((820, 480), _lanczos_filter())
+        preview_window._preview_photo = ImageTk.PhotoImage(display_image)
+        tk.Label(
+            preview_window, image=preview_window._preview_photo,
+            bg=PALETTE["card"], bd=1, relief="solid",
+        ).pack(padx=12, pady=(12, 8))
+
+        recognized = []
+        for box in boxes:
+            entry, score = self.db.lookup(box["text"])
+            label = entry["display"] if entry else f"{box['text']} (unknown)"
+            if label not in recognized:
+                recognized.append(label)
+        summary = ", ".join(recognized) if recognized else "No text was recognized."
+        tk.Label(
+            preview_window,
+            text=("Green boxes = recognized DDLC words • Red boxes = unknown\n"
+                  f"OCR read: {summary}"),
+            font=(FONT, 9), bg=PALETTE["bg"], fg=PALETTE["text"],
+            wraplength=800, justify="left", anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 8))
+
+        close_btn = RoundedButton(
+            preview_window, text="Close", command=preview_window.destroy,
+            font=(FONT, 9, "bold"), bg=PALETTE["accent"], fg="white",
+            hover_bg=PALETTE["accent_hover"], radius=14, padx=16, pady=6,
+            parent_bg=PALETTE["bg"],
+        )
+        close_btn.pack(pady=(0, 12))
+
     # -- actions -----------------------------------------------------------
     def _select_region(self):
         self.withdraw()
@@ -1302,6 +1548,7 @@ class App(tk.Tk):
             self.region = region
             self._save_region(region)
             self.status_var.set(self._region_status_text())
+            self._update_setup_status()
             self.deiconify()
 
         selector = RegionSelector(self, done)
@@ -1626,28 +1873,155 @@ class App(tk.Tk):
 
 
 # ---------------------------------------------------------------------------
-def check_dependencies():
+def find_tesseract_executable():
+    """Find Tesseract even when its installer did not update PATH yet."""
+    configured_path = load_app_settings().get("tesseract_path")
+    candidates = [
+        configured_path,
+        shutil.which("tesseract.exe"),
+        shutil.which("tesseract"),
+        os.path.join(BASE_DIR, "tesseract", "tesseract.exe"),
+    ]
+    if sys.platform == "win32":
+        for env_name in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+            base = os.environ.get(env_name)
+            if base:
+                candidates.append(os.path.join(base, "Tesseract-OCR", "tesseract.exe"))
+
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return os.path.abspath(candidate)
+    return None
+
+
+def configure_tesseract():
+    """Point pytesseract at the discovered executable, if one is available."""
+    executable = find_tesseract_executable()
+    if executable and pytesseract is not None:
+        pytesseract.pytesseract.tesseract_cmd = executable
+    return executable
+
+
+def missing_dependencies():
+    """Return missing Python packages and external OCR software."""
     missing = []
     if mss is None:
         missing.append("mss")
-    if Image is None:
+    if Image is None or ImageTk is None:
         missing.append("Pillow")
     if pytesseract is None:
-        missing.append("pytesseract (+ the Tesseract OCR program itself)")
+        missing.append("pytesseract")
     if process is None:
         missing.append("rapidfuzz")
+    if pyautogui is None:
+        missing.append("pyautogui")
+    if keyboard is None:
+        missing.append("keyboard (optional F12 stop hotkey)")
+    if find_tesseract_executable() is None:
+        missing.append("Tesseract OCR")
+    return missing
+
+
+def check_dependencies():
+    missing = missing_dependencies()
     if missing:
-        print("NOTE: some optional dependencies are missing:")
-        for m in missing:
-            print(f"  - {m}")
+        print("NOTE: some dependencies are missing:")
+        for item in missing:
+            print(f"  - {item}")
         print(
-            "The manual 'type the words in' box will still work.\n"
-            "Run: pip install -r requirements.txt   (and install Tesseract "
-            "separately - see README.md)\n"
+            "The manual 'type the words in' box may still work.\n"
+            "Run install_windows.bat (Windows) or install the requirements "
+            "manually.\n"
         )
 
 
+def run_windows_installer():
+    """Run setup, restart from the local virtual environment, and report success."""
+    if sys.platform != "win32":
+        messagebox.showerror(
+            "Windows setup only",
+            "install_windows.bat can only run on Windows.",
+        )
+        return False
+    if not os.path.isfile(WINDOWS_INSTALLER_PATH):
+        messagebox.showerror(
+            "Installer not found",
+            "install_windows.bat is missing from the application folder.\n\n"
+            "Install the missing components manually, then restart the app.",
+        )
+        return False
+
+    try:
+        installer_command = [
+            "cmd.exe", "/d", "/c", "call", WINDOWS_INSTALLER_PATH
+        ]
+        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        result = subprocess.run(
+            installer_command,
+            cwd=BASE_DIR,
+            creationflags=creationflags,
+            check=False,
+        )
+    except Exception as exc:
+        messagebox.showerror("Automatic setup failed", str(exc))
+        return False
+
+    if result.returncode != 0:
+        messagebox.showerror(
+            "Automatic setup failed",
+            "The installer did not finish successfully.\n\n"
+            "You can run install_windows.bat manually for more details.",
+        )
+        return False
+
+    messagebox.showinfo(
+        "Setup complete",
+        "Everything needed was installed. The assistant will now restart "
+        "using the new environment.",
+    )
+    try:
+        venv_python = os.path.join(BASE_DIR, ".venv", "Scripts", "pythonw.exe")
+        launcher = venv_python if os.path.isfile(venv_python) else sys.executable
+        subprocess.Popen(
+            [launcher, os.path.abspath(__file__), *sys.argv[1:]],
+            cwd=BASE_DIR,
+        )
+        return True
+    except Exception as exc:
+        messagebox.showerror(
+            "Restart failed",
+            f"Setup finished, but the assistant could not restart:\n\n{exc}",
+        )
+        return False
+
+
+def prompt_to_install_dependencies():
+    """Offer the bundled Windows installer when setup is incomplete."""
+    if sys.platform != "win32":
+        return True
+
+    configure_tesseract()
+    missing = missing_dependencies()
+    if not missing:
+        return True
+
+    missing_text = "\n".join(f"  • {item}" for item in missing)
+    message = (
+        "The following components are missing:\n\n"
+        f"{missing_text}\n\n"
+        "Would you like to download and install everything automatically?\n\n"
+        "Warning: installing Tesseract may require administrator/UAC "
+        "permission. It may also add Tesseract to your PATH so OCR can "
+        "work correctly."
+    )
+    if not messagebox.askyesno("Missing setup components", message):
+        return True
+    return not run_windows_installer()
+
+
 if __name__ == "__main__":
-    check_dependencies()
-    app = App()
-    app.mainloop()
+    if prompt_to_install_dependencies():
+        configure_tesseract()
+        check_dependencies()
+        app = App()
+        app.mainloop()
