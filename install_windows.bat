@@ -77,8 +77,7 @@ echo ================================================
 echo Setup complete.
 echo ================================================
 echo.
-echo You can also run it manually with:
-echo     "%VENV_PYTHON%" ddlc_poem_assistant.py
+echo Double-click run_windows.bat whenever you want to start the assistant.
 echo.
 pause
 exit /b 0
