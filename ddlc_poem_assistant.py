@@ -93,10 +93,16 @@ except ImportError:
 
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORD_DATA_PATH = os.path.join(BASE_DIR, "word_data.json")
-REGION_CONFIG_PATH = os.path.join(BASE_DIR, "capture_region.json")
-WINDOWS_INSTALLER_PATH = os.path.join(BASE_DIR, "install_windows.bat")
-APP_SETTINGS_PATH = os.path.join(BASE_DIR, "app_settings.json")
+RESOURCE_DIR = getattr(sys, "_MEIPASS", BASE_DIR)
+APP_DIR = (
+    os.path.dirname(sys.executable)
+    if getattr(sys, "frozen", False)
+    else BASE_DIR
+)
+WORD_DATA_PATH = os.path.join(RESOURCE_DIR, "word_data.json")
+REGION_CONFIG_PATH = os.path.join(APP_DIR, "capture_region.json")
+WINDOWS_INSTALLER_PATH = os.path.join(APP_DIR, "install_windows.bat")
+APP_SETTINGS_PATH = os.path.join(APP_DIR, "app_settings.json")
 
 CHARACTERS = ["sayori", "natsuki", "yuri", "monika"]
 
@@ -354,14 +360,12 @@ def extract_words_from_image(pil_img):
 
 
 def extract_words_with_boxes(pil_img):
-    """Like extract_words_from_image, but also returns each token's pixel
-    bounding box (scaled back to the ORIGINAL, un-upscaled region-image
-    coordinates) so auto-play knows where on screen to click.
+    """Run per-word OCR and return each token with its pixel bounding box.
 
-    Uses Tesseract's own per-word segmentation (image_to_data with sparse-
-    text mode) rather than the line-reconstruction approach, since we need
-    discrete boxes, not just a flat list of tokens. This is only used by
-    auto-play - the manual "Scan Screen" flow is untouched.
+    The boxes are scaled back to the ORIGINAL, un-upscaled region-image
+    coordinates so auto-play knows where on screen to click. The same OCR
+    path is used by the preview and manual scan so they cannot disagree about
+    which poem words were recognized.
     """
     if pytesseract is None:
         raise RuntimeError(
@@ -786,6 +790,8 @@ class RegionSelector(tk.Toplevel):
             20, 20, anchor="nw", fill="white",
             font=("Segoe UI", 14, "bold"),
             text="Drag a box around the poem word-choice area, then release.\n"
+                 "The assistant is hidden while you select. Keep it outside\n"
+                 "this box while scanning so it cannot cover any words.\n"
                  "Press Esc to cancel.",
         )
 
@@ -1389,6 +1395,39 @@ class App(tk.Tk):
                 selected=(self.selected_character.get() == "sayori"),
             )
 
+    def _capture_region_overlaps_assistant(self):
+        """Return True when the assistant window covers part of the OCR area."""
+        if not self.region or not self.winfo_viewable():
+            return False
+        try:
+            self.update_idletasks()
+            left, top, width, height = self.region
+            region_right = left + width
+            region_bottom = top + height
+            app_left = self.winfo_rootx()
+            app_top = self.winfo_rooty()
+            app_right = app_left + self.winfo_width()
+            app_bottom = app_top + self.winfo_height()
+            return (
+                left < app_right
+                and app_left < region_right
+                and top < app_bottom
+                and app_top < region_bottom
+            )
+        except tk.TclError:
+            return False
+
+    def _capture_region_is_clear(self):
+        if not self._capture_region_overlaps_assistant():
+            return True
+        messagebox.showwarning(
+            "Capture region is covered",
+            "The assistant window overlaps your saved poem-word capture region.\n\n"
+            "Move the assistant completely outside the word area, then try again.\n\n"
+            "OCR cannot recognize words hidden behind the assistant window.",
+        )
+        return False
+
     def _region_status_text(self):
         if self.region:
             return f"Capture region set: {self.region}"
@@ -1399,15 +1438,20 @@ class App(tk.Tk):
         region_state = "set" if self.region else "not set"
         tesseract_path = find_tesseract_executable()
         if missing:
-            self.setup_status_var.set(
+            status = (
                 "Setup needs attention: " + ", ".join(missing)
                 + f"\nOCR: {'found' if tesseract_path else 'not found'} • "
                   f"Capture region: {region_state}"
             )
         else:
-            self.setup_status_var.set(
+            status = (
                 f"Setup ready • OCR: Tesseract found • Capture region: {region_state}"
             )
+        if tesseract_path:
+            status += "\nOCR not working? Use Repair Setup or Tesseract Path."
+        else:
+            status += "\nTesseract not found? Use Repair Setup or Tesseract Path."
+        self.setup_status_var.set(status)
 
     def _choose_tesseract_path(self):
         current_path = find_tesseract_executable()
@@ -1462,6 +1506,8 @@ class App(tk.Tk):
                 "No region set",
                 "Click 'Setup' first and drag a box around the poem word area.",
             )
+            return
+        if not self._capture_region_is_clear():
             return
         if Image is None or ImageTk is None or pytesseract is None:
             messagebox.showerror(
@@ -1556,6 +1602,7 @@ class App(tk.Tk):
         # Ensure the main window comes back even if the user pressed Esc
         self.wait_window(selector)
         self.deiconify()
+        self._update_setup_status()
 
     def _scan_clicked(self):
         if not self.region:
@@ -1564,13 +1611,19 @@ class App(tk.Tk):
                 "around the row/grid of poem words in the game."
             )
             return
+        if not self._capture_region_is_clear():
+            return
         self.scan_btn.config_style(state="disabled", text="Scanning...")
         threading.Thread(target=self._do_scan, daemon=True).start()
 
     def _do_scan(self):
         try:
             img = grab_region(self.region)
-            tokens = extract_words_from_image(img)
+            # Use the same per-word OCR path as the preview. The old line OCR
+            # mode could omit short tiles such as "play", "warm", "milk",
+            # and "pure" even when the preview recognized them correctly.
+            boxes = extract_words_with_boxes(img)
+            tokens = [box["text"] for box in boxes]
             results = []
             seen = set()
             
@@ -1591,11 +1644,12 @@ class App(tk.Tk):
                                     seen.add(key)
                                     results.append((entry, word, score))
                     else:
-                        # Still unknown after split attempt
-                        key = tok.lower()
-                        if key not in seen:
-                            seen.add(key)
-                            results.append((None, tok, 0))
+                        # OCR can also pick up incidental text outside the
+                        # poem tiles (for example labels from another window).
+                        # Scan results should only contain recognized DDLC
+                        # words; unknown entries remain available for manual
+                        # typed-word analysis below.
+                        continue
                 else:
                     # Found it directly
                     key = entry["display"]
@@ -1626,6 +1680,9 @@ class App(tk.Tk):
                 "Please click 'Setup' and select the word-tile region first — "
                 "auto-play reuses that same region."
             )
+            return
+
+        if not self._capture_region_is_clear():
             return
 
         if pyautogui is None:
@@ -1880,8 +1937,11 @@ def find_tesseract_executable():
         configured_path,
         shutil.which("tesseract.exe"),
         shutil.which("tesseract"),
-        os.path.join(BASE_DIR, "tesseract", "tesseract.exe"),
+        os.path.join(RESOURCE_DIR, "tesseract", "tesseract.exe"),
     ]
+    frozen_dir = getattr(sys, "_MEIPASS", None)
+    if frozen_dir:
+        candidates.insert(0, os.path.join(frozen_dir, "tesseract", "tesseract.exe"))
     if sys.platform == "win32":
         for env_name in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
             base = os.environ.get(env_name)
@@ -1958,7 +2018,7 @@ def run_windows_installer():
         creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
         result = subprocess.run(
             installer_command,
-            cwd=BASE_DIR,
+            cwd=APP_DIR,
             creationflags=creationflags,
             check=False,
         )
@@ -1980,11 +2040,15 @@ def run_windows_installer():
         "using the new environment.",
     )
     try:
-        venv_python = os.path.join(BASE_DIR, ".venv", "Scripts", "pythonw.exe")
-        launcher = venv_python if os.path.isfile(venv_python) else sys.executable
+        if getattr(sys, "frozen", False):
+            restart_command = [sys.executable]
+        else:
+            venv_python = os.path.join(APP_DIR, ".venv", "Scripts", "pythonw.exe")
+            launcher = venv_python if os.path.isfile(venv_python) else sys.executable
+            restart_command = [launcher, os.path.abspath(__file__), *sys.argv[1:]]
         subprocess.Popen(
-            [launcher, os.path.abspath(__file__), *sys.argv[1:]],
-            cwd=BASE_DIR,
+            restart_command,
+            cwd=APP_DIR,
         )
         return True
     except Exception as exc:
