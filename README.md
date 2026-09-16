@@ -7,6 +7,7 @@ Video of the auto-play in action, set to 0.3s. :
 https://github.com/user-attachments/assets/ff3cf96d-f8a8-48e8-94e8-32613c63ec71
 
 
+
 **Includes an auto-installer for required OCR reading methods, python, and requirements for python. Just run install-windows.bat, The user will also be prompted to use install-windows.bat if the required dependencies are not found.**
 
 
