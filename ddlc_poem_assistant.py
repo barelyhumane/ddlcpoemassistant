@@ -23,6 +23,7 @@ SETUP (see README.md for full details)
 --------------------------------------------------------------------
 """
 
+import ctypes
 import json
 import os
 import re
@@ -33,6 +34,25 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk, messagebox
 
+
+def _set_windows_dpi_awareness():
+    """Tell Windows to render this Tk window at the display's native DPI."""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.OleDLL("shcore").SetProcessDpiAwareness(1)
+    except (AttributeError, OSError):
+        # Older Windows versions may not expose shcore; this fallback is the
+        # older system-wide DPI-aware API and is still better than bitmap
+        # scaling the entire Tk window.
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except (AttributeError, OSError):
+            pass
+
+
+_set_windows_dpi_awareness()
+
 # ---- Optional/third-party deps -------------------------------------------
 try:
     import mss
@@ -40,10 +60,12 @@ except ImportError:
     mss = None
 
 try:
-    from PIL import Image, ImageOps
+    from PIL import Image, ImageDraw, ImageOps, ImageTk
 except ImportError:
     Image = None
-
+    ImageDraw = None
+    
+    ImageTk = None
 try:
     import pytesseract
 except ImportError:
@@ -167,6 +189,8 @@ AUTOPLAY_MAX_ROUNDS = 20      # hard safety cap - a full poem is ~20 word picks
 AUTOPLAY_END_STREAK = 2       # consecutive "looks ended" scans required before stopping
 AUTOPLAY_MIN_KNOWN_WORDS = 2  # fewer recognized words than this -> tiles look gone
 AUTOPLAY_STOP_HOTKEY = "f12"  # global stop hotkey (only active if 'keyboard' is installed)
+
+UI_SUPERSAMPLE = 4  # render PIL shapes at 4x, then downsample for smooth edges
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +445,97 @@ def _rounded_rect_points(x1, y1, x2, y2, r):
     ]
 
 
+def _hex_to_rgb(hex_color):
+    value = hex_color.lstrip("#")
+    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _lanczos_filter():
+    """Return the Pillow resampling enum across supported Pillow versions."""
+    try:
+        return Image.Resampling.LANCZOS
+    except AttributeError:
+        return Image.LANCZOS
+
+
+def _make_rounded_image(width, height, fill, outline=None, radius=0, outline_width=1):
+    """Create an anti-aliased transparent rounded shape, or None without PIL."""
+    if Image is None or ImageDraw is None or ImageTk is None:
+        return None
+    try:
+        width = max(int(width), 1)
+        height = max(int(height), 1)
+        scale = UI_SUPERSAMPLE
+        image = Image.new("RGBA", (width * scale, height * scale), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        box = [
+            1 * scale,
+            1 * scale,
+            max(width - 1, 1) * scale,
+            max(height - 1, 1) * scale,
+        ]
+        draw.rounded_rectangle(
+            box,
+            radius=max(int(radius * scale), 1),
+            fill=fill,
+            outline=outline or fill,
+            width=max(int(outline_width * scale), 1),
+        )
+        return image.resize((width, height), _lanczos_filter())
+    except Exception:
+        return None
+
+
+def _make_decorative_strip(width, height, color1, color2, dot_color=None,
+                           radius=0, spacing=24, scallop_color=None,
+                           scallop_radius=0, y_start=0):
+    """Render header/footer decoration with supersampled PIL primitives."""
+    if Image is None or ImageDraw is None or ImageTk is None:
+        return None
+    try:
+        width = max(int(width), 1)
+        height = max(int(height), 1)
+        scale = UI_SUPERSAMPLE
+        scaled_width = width * scale
+        scaled_height = height * scale
+        image = Image.new("RGBA", (scaled_width, scaled_height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+
+        rgb1 = _hex_to_rgb(color1)
+        rgb2 = _hex_to_rgb(color2)
+        denominator = max(scaled_width - 1, 1)
+        for x in range(scaled_width):
+            factor = x / denominator
+            color = tuple(int(rgb1[i] + (rgb2[i] - rgb1[i]) * factor) for i in range(3))
+            draw.line((x, 0, x, scaled_height), fill=color + (255,))
+
+        if dot_color:
+            row = 0
+            y = (y_start + spacing / 2) * scale
+            while y < scaled_height:
+                x_offset = (spacing / 2) if row % 2 else 0
+                x = x_offset * scale
+                while x < scaled_width:
+                    r = radius * scale
+                    draw.ellipse((x - r, y - r, x + r, y + r), fill=dot_color)
+                    x += spacing * scale
+                y += spacing * 0.87 * scale
+                row += 1
+
+        if scallop_color and scallop_radius > 0:
+            r = scallop_radius * scale
+            step = r * 2
+            x = -r
+            y = height * scale
+            while x < scaled_width + r:
+                draw.ellipse((x - r, y - r, x + r, y + r), fill=scallop_color)
+                x += step
+
+        return image.resize((width, height), _lanczos_filter())
+    except Exception:
+        return None
+
+
 class RoundedButton(tk.Canvas):
     """A pill/rounded-rectangle button (DDLC's actual button shape) built
     on a Canvas, since plain tk.Button can't do rounded corners. Exposes a
@@ -455,6 +570,7 @@ class RoundedButton(tk.Canvas):
         self.state = state
         self.selected = False
         self._hovering = False
+        self._shape_photo = None
         self._redraw()
         self.bind("<Configure>", lambda e: self._redraw())
         self.bind("<Enter>", self._on_enter)
@@ -482,12 +598,26 @@ class RoundedButton(tk.Canvas):
         else:
             color, textcolor = self.bg, self.fg
         pts = _rounded_rect_points(2, 2, w - 2, h - 2, self.radius)
-        self.create_polygon(pts, smooth=True, fill=color, outline=color)
-        if self.selected:
-            # A slightly darker ring around a selected button - a clear,
-            # persistent "this one is picked" indicator independent of
-            # mouse position (unlike hover, which comes and goes).
-            self.create_polygon(pts, smooth=True, fill="", outline=darken_color(color, 0.25), width=2)
+        smooth_shape = _make_rounded_image(
+            w,
+            h,
+            color,
+            darken_color(color, 0.25) if self.selected else color,
+            self.radius,
+            2 if self.selected else 1,
+        )
+        if smooth_shape is not None:
+            self._shape_photo = ImageTk.PhotoImage(smooth_shape)
+            self.create_image(0, 0, anchor="nw", image=self._shape_photo, tags="shape")
+        else:
+            # Keep the original Canvas implementation as a dependency-safe
+            # fallback if Pillow/ImageTk cannot render the smooth shape.
+            self.create_polygon(pts, smooth=True, fill=color, outline=color)
+            if self.selected:
+                # A slightly darker ring around a selected button - a clear,
+                # persistent "this one is picked" indicator independent of
+                # mouse position (unlike hover, which comes and goes).
+                self.create_polygon(pts, smooth=True, fill="", outline=darken_color(color, 0.25), width=2)
         self.create_text(w // 2, h // 2, text=self.text, fill=textcolor, font=self.font_obj)
 
     def _on_enter(self, event=None):
@@ -562,6 +692,7 @@ class RoundedCard(tk.Frame):
         self.canvas.pack(fill="both", expand=True)
         self.body = tk.Frame(self.canvas, bg=self.bg)
         self._win = self.canvas.create_window(4, 4, window=self.body, anchor="nw")
+        self._bg_photo = None
         self.body.bind("<Configure>", self._sync_min_size)
         self.canvas.bind("<Configure>", self._redraw)
 
@@ -584,8 +715,17 @@ class RoundedCard(tk.Frame):
         self.canvas.delete("bgshape")
         if w > 4 and h > 4:
             pts = _rounded_rect_points(1, 1, w - 1, h - 1, self.radius)
-            self.canvas.create_polygon(pts, smooth=True, fill=self.bg,
-                                        outline=self.border, width=1, tags="bgshape")
+            smooth_shape = _make_rounded_image(
+                w, h, self.bg, self.border, self.radius, 1
+            )
+            if smooth_shape is not None:
+                self._bg_photo = ImageTk.PhotoImage(smooth_shape)
+                self.canvas.create_image(
+                    0, 0, anchor="nw", image=self._bg_photo, tags="bgshape"
+                )
+            else:
+                self.canvas.create_polygon(pts, smooth=True, fill=self.bg,
+                                            outline=self.border, width=1, tags="bgshape")
             self.canvas.tag_lower("bgshape")
             # Let the body fill whatever space the canvas actually has (this
             # is what lets a fill="both", expand=True card - like the results
@@ -770,9 +910,27 @@ class App(tk.Tk):
             w = header.winfo_width()
             if w <= 1:
                 w = 520
-            draw_gradient(header, w, 64, PALETTE["header_from"], PALETTE["header_to"])
-            draw_polka_dots(header, w, 64, lighten_color(PALETTE["header_from"], 0.4),
-                             radius=3, spacing=26)
+            smooth_header = _make_decorative_strip(
+                w,
+                64,
+                PALETTE["header_from"],
+                PALETTE["header_to"],
+                dot_color=lighten_color(PALETTE["header_from"], 0.4),
+                radius=3,
+                spacing=26,
+                scallop_color=PALETTE["bg"],
+                scallop_radius=7,
+            )
+            if smooth_header is not None:
+                # Keep the PhotoImage alive; Tk otherwise garbage-collects it
+                # after this callback and the background can turn blank.
+                header._background_photo = ImageTk.PhotoImage(smooth_header)
+                header.create_image(0, 0, anchor="nw", image=header._background_photo)
+            else:
+                draw_gradient(header, w, 64, PALETTE["header_from"], PALETTE["header_to"])
+                draw_polka_dots(header, w, 64, lighten_color(PALETTE["header_from"], 0.4),
+                                 radius=3, spacing=26)
+                draw_scalloped_edge(header, w, 64, 7, PALETTE["bg"])
             header.create_text(
                 18, 20, anchor="w", text="🎀  DDLC+ Poem Assistant",
                 font=(FONT, 15, "bold"), fill=PALETTE["text"],
@@ -782,7 +940,6 @@ class App(tk.Tk):
                 text="Find the best word for each doki, straight off your screen.",
                 font=(FONT, 8), fill=PALETTE["text"],
             )
-            draw_scalloped_edge(header, w, 64, 7, PALETTE["bg"])
         header.bind("<Configure>", _paint_header)
         header.update_idletasks()
         _paint_header()
@@ -800,8 +957,21 @@ class App(tk.Tk):
             w = footer.winfo_width()
             if w <= 1:
                 w = 520
-            draw_polka_dots(footer, w, 14, lighten_color(PALETTE["accent"], 0.55),
-                             radius=2, spacing=20)
+            smooth_footer = _make_decorative_strip(
+                w,
+                14,
+                PALETTE["accent_soft"],
+                PALETTE["accent_soft"],
+                dot_color=lighten_color(PALETTE["accent"], 0.55),
+                radius=2,
+                spacing=20,
+            )
+            if smooth_footer is not None:
+                footer._background_photo = ImageTk.PhotoImage(smooth_footer)
+                footer.create_image(0, 0, anchor="nw", image=footer._background_photo)
+            else:
+                draw_polka_dots(footer, w, 14, lighten_color(PALETTE["accent"], 0.55),
+                                 radius=2, spacing=20)
         footer.bind("<Configure>", _paint_footer)
         footer.update_idletasks()
         _paint_footer()
