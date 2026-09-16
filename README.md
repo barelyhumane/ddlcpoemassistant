@@ -20,16 +20,6 @@ https://github.com/user-attachments/assets/ff3cf96d-f8a8-48e8-94e8-32613c63ec71
 
 incase you don't understand what it means by "switching to ddlc window", it means to CLICK onto ddlc so the game is focused, if you don't do this, it'll stop on the final round (haven't tested, probably the case.)
 
-to start, click the green button named code, download zip, extract then do th instructions below (as you need ALL the files linked in the repo)
-
-
-Manual method:
-
-1. tesseract - https://github.com/tesseract-ocr/tesseract/releases/download/5.5.3/tesseract-ocr-w64-setup-5.5.3.20260724.exe (used for reading text)
-2. python - search up python download idk
-3. then open cmd prompt, and enter this to install the requirements. pip install -r requirements.txt
-4. to run it, just open cmd prompt in the folder with the poem file and type in 'python ddlc_poem_assistant.py' (or just double click the py file, idk. both methods work))
-
 <img width="561" height="120" alt="Screenshot 2026-09-16 165556" src="https://github.com/user-attachments/assets/814a9665-39b6-4d17-af0c-07f59e532642" />
 <img width="370" height="139" alt="Screenshot 2026-09-16 165550" src="https://github.com/user-attachments/assets/13e9baa1-bf0f-46e9-bb77-9dc8a792ad68" />
 <img width="669" height="81" alt="Screenshot 2026-09-16 165610" src="https://github.com/user-attachments/assets/f6f66eed-c5c5-437f-a0cf-3c6945f4efea" />
