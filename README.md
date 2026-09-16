@@ -3,7 +3,7 @@ A small desktop tool for the poem minigame in *Doki Doki Literature Club Plus!* 
 
 ## Standalone Windows build (recommended)
 
-Download `DDLC+ Poem Assistant.exe` from the latest GitHub release and run it directly. This is a self-contained Windows build that includes the Python dependencies, word data, and Tesseract OCR.
+Download `DDLCPoemAssistant.exe` from the latest GitHub release and run it directly. This is a self-contained Windows build that includes the Python dependencies, word data, and Tesseract OCR.
 
 You do not need to install Python or Tesseract separately. The first launch may take a few seconds while the bundled files are extracted.
 
