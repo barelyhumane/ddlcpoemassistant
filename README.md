@@ -48,6 +48,5 @@ incase you don't understand what it means by "switching to ddlc window", it mean
 <img width="561" height="120" alt="Screenshot 2026-09-16 165556" src="https://github.com/user-attachments/assets/814a9665-39b6-4d17-af0c-07f59e532642" />
 <img width="370" height="139" alt="Screenshot 2026-09-16 165550" src="https://github.com/user-attachments/assets/13e9baa1-bf0f-46e9-bb77-9dc8a792ad68" />
 <img width="669" height="81" alt="Screenshot 2026-09-16 165610" src="https://github.com/user-attachments/assets/f6f66eed-c5c5-437f-a0cf-3c6945f4efea" />
-<img width="1072" height="120" alt="Screenshot 2026-09-16 165658" src="https://github.com/user-attachments/assets/0995581b-628e-4ed2-8123-90d85d7e58ce" />
 
 
